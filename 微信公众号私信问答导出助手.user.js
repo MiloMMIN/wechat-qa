@@ -1,8 +1,11 @@
 // ==UserScript==
 // @name         微信公众号私信问答导出助手
-// @version      3.3
-// @author       Milo Ming (温州科技职业学院)
+// @namespace    https://github.com/MiloMMIN/wechat-qa
+// @version      3.4
 // @description  一键导出粉丝真实提问与AI/号主回复，支持暂停/继续/取消，完整年月日时间
+// @author       Milo Ming
+// @organization 温州科技职业学院
+// @copyright    2026, Milo Ming (温州科技职业学院)
 // @match        https://mp.weixin.qq.com/cgi-bin/message*
 // @homepageURL  https://github.com/MiloMMIN/wechat-qa
 // @supportURL   https://github.com/MiloMMIN/wechat-qa/issues
@@ -11,6 +14,12 @@
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
+/**
+ * 微信公众号私信问答导出助手
+ * Author: Milo Ming
+ * Organization: 温州科技职业学院
+ * GitHub: https://github.com/MiloMMIN/wechat-qa
+ */
 
 (function() {
   'use strict';
@@ -25,7 +34,10 @@
       'display:flex;align-items:center;gap:6px;font-size:13px;flex-wrap:wrap;max-width:520px;';
     var bs = 'border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;color:#fff;';
     panel.innerHTML =
-      '<span style="font-weight:bold;margin-right:4px;">QA\u52A9\u624B v3.3</span>' +
+      '<div style="width:100%;display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">' +
+        '<span style="font-weight:bold;color:#07c160;font-size:14px;">QA\u52A9\u624B v3.4</span>' +
+        '<span style="font-size:11px;color:#888;">Milo Ming | \u6E29\u5dde\u79d1\u6280\u804c\u4e1a\u5b66\u9662</span>' +
+      '</div>' +
       '<label>\u6570\u91CF: <input id="qa-count" type="number" value="20" min="1" max="999" ' +
       'style="width:50px;text-align:center;border:1px solid #ccc;border-radius:3px;"></label>' +
       '<button id="qa-start-btn" style="' + bs + 'background:#07c160;">\uD83D\uDCE5 \u5F00\u59CB\u5BFC\u51FA</button>' +
