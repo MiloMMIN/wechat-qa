@@ -34,10 +34,7 @@
       'display:flex;align-items:center;gap:6px;font-size:13px;flex-wrap:wrap;max-width:520px;';
     var bs = 'border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;color:#fff;';
     panel.innerHTML =
-      '<div style="width:100%;display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">' +
-        '<span style="font-weight:bold;color:#07c160;font-size:14px;">QA\u52A9\u624B v3.4</span>' +
-        '<span style="font-size:11px;color:#888;">Milo Ming | \u6E29\u5dde\u79d1\u6280\u804c\u4e1a\u5b66\u9662</span>' +
-      '</div>' +
+      '<span style="font-weight:bold;margin-right:4px;">QA\u52A9\u624B v3.4</span>' +
       '<label>\u6570\u91CF: <input id="qa-count" type="number" value="20" min="1" max="999" ' +
       'style="width:50px;text-align:center;border:1px solid #ccc;border-radius:3px;"></label>' +
       '<button id="qa-start-btn" style="' + bs + 'background:#07c160;">\uD83D\uDCE5 \u5F00\u59CB\u5BFC\u51FA</button>' +
