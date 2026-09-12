@@ -6,8 +6,8 @@
 // @match        https://mp.weixin.qq.com/cgi-bin/message*
 // @homepageURL  https://github.com/MiloMMIN/wechat-qa
 // @supportURL   https://github.com/MiloMMIN/wechat-qa/issues
-// @updateURL    https://testingcf.jsdelivr.net/gh/MiloMMIN/wechat-qa@main/wechat-qa.user.js
-// @downloadURL  https://testingcf.jsdelivr.net/gh/MiloMMIN/wechat-qa@main/wechat-qa.user.js
+// @updateURL    https://testingcf.jsdelivr.net/gh/MiloMMIN/wechat-qa@master/wechat-qa.user.js
+// @downloadURL  https://testingcf.jsdelivr.net/gh/MiloMMIN/wechat-qa@master/wechat-qa.user.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==

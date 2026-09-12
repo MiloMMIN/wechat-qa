@@ -10,8 +10,8 @@
 
 需先在浏览器安装 [Tampermonkey (油猴插件)](https://www.tampermonkey.net/) 或 [ScriptCat (脚本猫)](https://scriptcat.org/)，然后点击下方任一安装链接：
 
-- ⚡ [通过 Fastly / jsDelivr CDN 安装（国内直连推荐）](https://testingcf.jsdelivr.net/gh/MiloMMIN/wechat-qa@main/wechat-qa.user.js)
-- 🐙 [通过 GitHub Raw 安装](https://raw.githubusercontent.com/MiloMMIN/wechat-qa/main/wechat-qa.user.js)
+- ⚡ [通过 Fastly / jsDelivr CDN 安装（国内直连推荐）](https://testingcf.jsdelivr.net/gh/MiloMMIN/wechat-qa@master/wechat-qa.user.js)
+- 🐙 [通过 GitHub Raw 安装](https://raw.githubusercontent.com/MiloMMIN/wechat-qa/master/wechat-qa.user.js)
 
 ### 方式二：手动安装
 1. 打开 `wechat-qa.user.js`；
