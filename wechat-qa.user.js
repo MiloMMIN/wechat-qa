@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微信公众号私信问答导出助手
 // @namespace    https://github.com/MiloMMIN/wechat-qa
-// @version      3.6
+// @version      3.7
 // @description  一键导出粉丝真实提问与AI/号主回复，支持暂停/继续/取消，完整年月日时间
 // @author       Milo Ming
 // @organization 温州科技职业学院
@@ -34,7 +34,7 @@
       'display:flex;align-items:center;gap:6px;font-size:13px;flex-wrap:wrap;max-width:520px;';
     var bs = 'border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;color:#fff;';
     panel.innerHTML =
-      '<span style="font-weight:bold;margin-right:4px;">QA\u52A9\u624B v3.6</span>' +
+      '<span style="font-weight:bold;margin-right:4px;">QA\u52A9\u624B v3.7</span>' +
       '<label>\u6570\u91CF: <input id="qa-count" type="number" value="20" min="1" max="999" ' +
       'style="width:50px;text-align:center;border:1px solid #ccc;border-radius:3px;"></label>' +
       '<button id="qa-start-btn" style="' + bs + 'background:#07c160;">\uD83D\uDCE5 \u5F00\u59CB\u5BFC\u51FA</button>' +
@@ -148,6 +148,8 @@
   // ========== 定位右侧会话消息容器 ==========
   var chatBoxCache = null;
   function findChatBox() {
+    var byId = document.getElementById('msgChatListDiv');
+    if (byId) return byId;
     if (chatBoxCache && document.contains(chatBoxCache)) return chatBoxCache;
     chatBoxCache = null;
     var allDivs = document.querySelectorAll('div');
@@ -162,22 +164,29 @@
   }
   function getChatText() { var box = findChatBox(); return box ? (box.innerText || '') : ''; }
 
-  // 点击卡片后轮询等待右侧会话真正切换并渲染稳定（变化后连续两次读取一致才算稳定），
-  // 返回是否真的发生了切换；未切换说明点击落空，需要重试
-  async function waitForChatSwitch(prevText) {
-    var deadline = Date.now() + 2500;
-    var last = prevText;
-    var changed = false;
+  // 点击后等待选中态落到本卡片：选中项带 .msg-user-select 类；
+  // 节点若被重建则用选中卡片的昵称比对；都不行时退化为聊天内容是否变化（空昵称/同昵称兜底）
+  async function waitForSelected(target, nickname, prevText) {
+    var deadline = Date.now() + 3000;
+    while (Date.now() < deadline && !state.cancelled) {
+      var sel = document.querySelector('.msg-user-item.msg-user-select');
+      if (sel && (sel === target || (nickname && getNickname(sel) === nickname))) return true;
+      if (getChatText() !== prevText) return true;
+      await sleep(200);
+    }
+    return false;
+  }
+  // 确认切换后再等聊天内容渲染稳定（连续两次读取一致），避免抓到加载中的半成品
+  async function waitChatSettled() {
+    var deadline = Date.now() + 2000;
+    var last = getChatText();
     var stable = 0;
     while (Date.now() < deadline && !state.cancelled) {
       await sleep(250);
       var cur = getChatText();
-      if (cur !== prevText) changed = true;
-      if (changed && cur === last) { stable++; if (stable >= 2) break; }
-      else stable = 0;
+      if (cur === last) { stable++; if (stable >= 2) break; } else stable = 0;
       last = cur;
     }
-    return changed;
   }
 
   // ========== 核心提取（Playwright 实测验证）==========
@@ -230,6 +239,9 @@
   // 未读角标（纯数字，如“1”“99+”）排在昵称之前时丢弃
   var TIME_TAIL = /\s*(?:(?:\u6628\u5929|\u524D\u5929|\u661F\u671F.|\d{1,2}\u6708\d{1,2}\u65E5|\d{4}[-\/.]\d{1,2}[-\/.]\d{1,2})\s*(?:\d{1,2}:\d{2})?|\d{1,2}:\d{2})\s*$/;
   function getNickname(card) {
+    var el = card.querySelector('.user-info__name');
+    if (el && (el.innerText || '').trim()) return el.innerText.trim();
+    // 兜底：逐行过滤（角标纯数字 / 时间 / “我：xxx”预览 / AI 标记）
     var lines = (card.innerText || '').split('\n');
     var candidates = [];
     for (var i = 0; i < lines.length; i++) {
@@ -294,6 +306,9 @@
       var cards = document.querySelectorAll('.msg-user-item');
       var idx = pickNextCard(cards, cursor, done);
       if (idx === -1) {
+        // 列表仍在加载中：等待而不是记 stall
+        var loadingEl = document.querySelector('.user_list .weui-desktop-loading');
+        if (loadingEl && loadingEl.offsetParent !== null) { await sleep(500); continue; }
         // 已加载的卡片都处理完了：按半屏步进往下滚，触发加载更多（步进小于一屏，避免滚过头漏卡片）
         stall++;
         if (scrollBox && scrollBox !== document.body) {
@@ -317,7 +332,8 @@
       var nickname = getNickname(card);
       var prevText = getChatText();
 
-      // 点击并确认右侧会话真的切换；未切换多半是点击瞬间节点被重建导致落空，重新取同位置节点重试
+      // 点击卡片内层 .user-info-wrap（事件可能绑在内层而不是整卡），
+      // 并确认选中态 .msg-user-select 落到本卡片；未确认多半是点击瞬间节点被重建导致落空，重新取同位置节点重试
       var switched = false;
       var target = card;
       for (var attempt = 0; attempt < 3 && !switched && !state.cancelled; attempt++) {
@@ -326,12 +342,15 @@
           if (fresh[idx] && document.contains(fresh[idx])) target = fresh[idx];
         }
         if (!document.contains(target)) break;
-        target.scrollIntoView({ block: 'nearest' });
-        target.click();
-        switched = await waitForChatSwitch(prevText);
+        var clickEl = target.querySelector('.user-info-wrap') || target;
+        clickEl.scrollIntoView({ block: 'nearest' });
+        clickEl.click();
+        switched = await waitForSelected(target, nickname, prevText);
       }
       if (!switched) {
         console.warn('[QA\u52A9\u624B] \u4F1A\u8BDD\u672A\u786E\u8BA4\u5207\u6362\uFF0C\u53EF\u80FD\u70B9\u51FB\u843D\u7A7A\u6216\u4E0E\u4E0A\u4E00\u4F1A\u8BDD\u5185\u5BB9\u76F8\u540C: ' + nickname);
+      } else {
+        await waitChatSettled();
       }
 
       done.add(card);
