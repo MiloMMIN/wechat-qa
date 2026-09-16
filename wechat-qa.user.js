@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微信公众号私信问答导出助手
 // @namespace    https://github.com/MiloMMIN/wechat-qa
-// @version      3.7
+// @version      3.8
 // @description  一键导出粉丝真实提问与AI/号主回复，支持暂停/继续/取消，完整年月日时间
 // @author       Milo Ming
 // @organization 温州科技职业学院
@@ -34,15 +34,17 @@
       'display:flex;align-items:center;gap:6px;font-size:13px;flex-wrap:wrap;max-width:520px;';
     var bs = 'border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;color:#fff;';
     panel.innerHTML =
-      '<span style="font-weight:bold;margin-right:4px;">QA\u52A9\u624B v3.7</span>' +
+      '<span style="font-weight:bold;margin-right:4px;">QA\u52A9\u624B v3.8</span>' +
       '<label>\u6570\u91CF: <input id="qa-count" type="number" value="20" min="1" max="999" ' +
       'style="width:50px;text-align:center;border:1px solid #ccc;border-radius:3px;"></label>' +
-      '<button id="qa-start-btn" style="' + bs + 'background:#07c160;">\uD83D\uDCE5 \u5F00\u59CB\u5BFC\u51FA</button>' +
+      '<button id="qa-start-btn" style="' + bs + 'background:#07c160;">\uD83D\uDCE5 \u4ECE\u5F53\u524D\u5F00\u59CB</button>' +
+      '<button id="qa-start-top-btn" style="' + bs + 'background:#1890ff;">\u23EE \u4ECE\u5934\u5F00\u59CB</button>' +
       '<button id="qa-pause-btn" style="' + bs + 'background:#e6a23c;display:none;">\u23F8 \u6682\u505C</button>' +
       '<button id="qa-cancel-btn" style="' + bs + 'background:#f56c6c;display:none;">\u2716 \u53D6\u6D88</button>' +
       '<div id="qa-status" style="width:100%;font-size:12px;color:#666;margin-top:4px;"></div>';
     document.body.appendChild(panel);
-    document.getElementById('qa-start-btn').addEventListener('click', startExport);
+    document.getElementById('qa-start-btn').addEventListener('click', function() { startExport(false); });
+    document.getElementById('qa-start-top-btn').addEventListener('click', function() { startExport(true); });
     document.getElementById('qa-pause-btn').addEventListener('click', togglePause);
     document.getElementById('qa-cancel-btn').addEventListener('click', cancelExport);
   }, 2000);
@@ -67,6 +69,7 @@
     document.getElementById('qa-pause-btn').style.display = show ? 'inline-block' : 'none';
     document.getElementById('qa-cancel-btn').style.display = show ? 'inline-block' : 'none';
     document.getElementById('qa-start-btn').style.display = show ? 'none' : 'inline-block';
+    document.getElementById('qa-start-top-btn').style.display = show ? 'none' : 'inline-block';
     document.getElementById('qa-count').disabled = show;
   }
   async function waitIfPaused() {
@@ -258,9 +261,11 @@
   // ========== 选择下一张要处理的卡片：严格按列表顺序，以 DOM 节点为身份 ==========
   // 先从游标处往下找第一个未处理的卡片；找不到再回头扫描（列表重排 / 虚拟滚动补渲染出的新节点）。
   // 若页面里已没有任何处理过的节点，说明列表被整体重建，此时不回头，避免从头重复抓取。
-  function pickNextCard(cards, cursor, done) {
+  // allowWrap=false（从当前开始模式）时不回头：游标之上的会话是用户有意跳过的。
+  function pickNextCard(cards, cursor, done, allowWrap) {
     var i;
     for (i = cursor; i < cards.length; i++) if (!done.has(cards[i])) return i;
+    if (!allowWrap) return -1;
     var anyKnown = false;
     for (i = 0; i < cards.length; i++) if (done.has(cards[i])) { anyKnown = true; break; }
     if (!anyKnown) return -1;
@@ -269,7 +274,8 @@
   }
 
   // ========== 主导出流程 ==========
-  async function startExport() {
+  // fromTop=true 从列表第一张卡片开始；false 从当前选中（.msg-user-select）的卡片开始往下
+  async function startExport(fromTop) {
     if (state.running) return;
     state.running = true;
     state.paused = false;
@@ -296,6 +302,19 @@
     var dataset = [];
     var done = new WeakSet();   // 已处理过的卡片节点。不按昵称去重：同名、角标“1”、时间文本被当成昵称都会导致漏抓
     var cursor = 0;             // 列表位置游标，严格按顺序往下读
+    if (!fromTop) {
+      // 从当前开始：以选中卡片为起点（含它本身），只往下统计
+      cursor = -1;
+      for (var ci = 0; ci < allCards.length; ci++) {
+        if (allCards[ci].classList.contains('msg-user-select')) { cursor = ci; break; }
+      }
+      if (cursor === -1) {
+        alert('\u672A\u627E\u5230\u5F53\u524D\u9009\u4E2D\u7684\u4F1A\u8BDD\uFF0C\u8BF7\u5148\u70B9\u51FB\u5DE6\u4FA7\u4E00\u4E2A\u4F1A\u8BDD\uFF0C\u6216\u6539\u7528\u201C\u4ECE\u5934\u5F00\u59CB\u201D');
+        state.running = false;
+        showControls(false);
+        return;
+      }
+    }
     var stall = 0;              // 连续“没有新卡片可处理”的次数
 
     while (dataset.length < maxCount && stall < 8) {
@@ -304,7 +323,7 @@
       if (state.cancelled) break;
 
       var cards = document.querySelectorAll('.msg-user-item');
-      var idx = pickNextCard(cards, cursor, done);
+      var idx = pickNextCard(cards, cursor, done, fromTop);
       if (idx === -1) {
         // 列表仍在加载中：等待而不是记 stall
         var loadingEl = document.querySelector('.user_list .weui-desktop-loading');
