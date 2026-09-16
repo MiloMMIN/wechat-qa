@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微信公众号私信问答导出助手
 // @namespace    https://github.com/MiloMMIN/wechat-qa
-// @version      3.4
+// @version      3.5
 // @description  一键导出粉丝真实提问与AI/号主回复，支持暂停/继续/取消，完整年月日时间
 // @author       Milo Ming
 // @organization 温州科技职业学院
@@ -34,7 +34,7 @@
       'display:flex;align-items:center;gap:6px;font-size:13px;flex-wrap:wrap;max-width:520px;';
     var bs = 'border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;color:#fff;';
     panel.innerHTML =
-      '<span style="font-weight:bold;margin-right:4px;">QA\u52A9\u624B v3.4</span>' +
+      '<span style="font-weight:bold;margin-right:4px;">QA\u52A9\u624B v3.5</span>' +
       '<label>\u6570\u91CF: <input id="qa-count" type="number" value="20" min="1" max="999" ' +
       'style="width:50px;text-align:center;border:1px solid #ccc;border-radius:3px;"></label>' +
       '<button id="qa-start-btn" style="' + bs + 'background:#07c160;">\uD83D\uDCE5 \u5F00\u59CB\u5BFC\u51FA</button>' +
@@ -74,6 +74,7 @@
       await new Promise(function(r) { setTimeout(r, 200); });
     }
   }
+  function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
   // ========== 时间戳转完整年月日 ==========
   function toFullDateTime(rawTime) {
@@ -144,19 +145,41 @@
     return { time: '', question: text };
   }
 
-  // ========== 核心提取（Playwright 实测验证）==========
-  function extractQAPairs() {
-    var chatBox = null;
+  // ========== 定位右侧会话消息容器 ==========
+  var chatBoxCache = null;
+  function findChatBox() {
+    if (chatBoxCache && document.contains(chatBoxCache)) return chatBoxCache;
+    chatBoxCache = null;
     var allDivs = document.querySelectorAll('div');
     for (var i = 0; i < allDivs.length; i++) {
-      var d = allDivs[i];
-      var fc = d.firstElementChild;
+      var fc = allDivs[i].firstElementChild;
       if (fc && fc.innerText && fc.innerText.trim() === '\u4EC5\u4FDD\u5B58\u6700\u8FD130\u5929\u7684\u79C1\u4FE1') {
-        chatBox = d;
+        chatBoxCache = allDivs[i];
         break;
       }
     }
-    if (!chatBox) return { pairs: [], firstTime: '' };
+    return chatBoxCache;
+  }
+  function getChatText() { var box = findChatBox(); return box ? (box.innerText || '') : ''; }
+
+  // 点击卡片后轮询等待右侧会话真正切换并渲染稳定，避免固定等待过短把上一位粉丝的内容记到当前粉丝头上
+  async function waitForChatSwitch(prevText) {
+    var deadline = Date.now() + 2500;
+    var last = prevText;
+    var changed = false;
+    while (Date.now() < deadline && !state.cancelled) {
+      await sleep(250);
+      var cur = getChatText();
+      if (cur !== prevText) changed = true;
+      if (changed && cur === last) break;
+      last = cur;
+    }
+  }
+
+  // ========== 核心提取（Playwright 实测验证）==========
+  function extractQAPairs() {
+    var chatBox = findChatBox();
+    if (!chatBox) return { pairs: [], lastTime: '' };
 
     var children = Array.from(chatBox.children);
     var pairs = [];
@@ -198,6 +221,37 @@
     return { pairs: pairs, lastTime: lastTime };
   }
 
+  // ========== 从会话卡片解析昵称（仅用于标注，不参与去重）==========
+  // 去掉行尾时间（“昨天 15:53”“9月11日 14:52”“15:53”等），过滤“我：xxx”预览与 AI 标记，
+  // 未读角标（纯数字，如“1”“99+”）排在昵称之前时丢弃
+  var TIME_TAIL = /\s*(?:(?:\u6628\u5929|\u524D\u5929|\u661F\u671F.|\d{1,2}\u6708\d{1,2}\u65E5|\d{4}[-\/.]\d{1,2}[-\/.]\d{1,2})\s*(?:\d{1,2}:\d{2})?|\d{1,2}:\d{2})\s*$/;
+  function getNickname(card) {
+    var lines = (card.innerText || '').split('\n');
+    var candidates = [];
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].replace(TIME_TAIL, '').trim();
+      if (!t) continue;
+      if (/^\u6211[\uFF1A:]/.test(t)) continue;
+      if (t.indexOf('\u5185\u5BB9\u7531AI\u751F\u6210') !== -1) continue;
+      candidates.push(t);
+    }
+    if (candidates.length > 1 && /^\d{1,3}\+?$/.test(candidates[0])) candidates.shift();
+    return candidates[0] || '';
+  }
+
+  // ========== 选择下一张要处理的卡片：严格按列表顺序，以 DOM 节点为身份 ==========
+  // 先从游标处往下找第一个未处理的卡片；找不到再回头扫描（列表重排 / 虚拟滚动补渲染出的新节点）。
+  // 若页面里已没有任何处理过的节点，说明列表被整体重建，此时不回头，避免从头重复抓取。
+  function pickNextCard(cards, cursor, done) {
+    var i;
+    for (i = cursor; i < cards.length; i++) if (!done.has(cards[i])) return i;
+    var anyKnown = false;
+    for (i = 0; i < cards.length; i++) if (done.has(cards[i])) { anyKnown = true; break; }
+    if (!anyKnown) return -1;
+    for (i = 0; i < cursor && i < cards.length; i++) if (!done.has(cards[i])) return i;
+    return -1;
+  }
+
   // ========== 主导出流程 ==========
   async function startExport() {
     if (state.running) return;
@@ -224,66 +278,49 @@
     }
 
     var dataset = [];
-    var visited = new Set();
-    var noNewCount = 0;
+    var done = new WeakSet();   // 已处理过的卡片节点。不按昵称去重：同名、角标“1”、时间文本被当成昵称都会导致漏抓
+    var cursor = 0;             // 列表位置游标，严格按顺序往下读
+    var stall = 0;              // 连续“没有新卡片可处理”的次数
 
-    for (var step = 0; step < 200 && dataset.length < maxCount && noNewCount < 5; step++) {
+    while (dataset.length < maxCount && stall < 5) {
       if (state.cancelled) break;
       await waitIfPaused();
       if (state.cancelled) break;
 
       var cards = document.querySelectorAll('.msg-user-item');
-      var foundNew = false;
-
-      for (var i = 0; i < cards.length && dataset.length < maxCount; i++) {
-        if (state.cancelled) break;
-        await waitIfPaused();
-        if (state.cancelled) break;
-
-        var card = cards[i];
-        var infoWrap = card.querySelector('.user-info-wrap') || card.querySelector('div');
-        var nameChildren = infoWrap ? infoWrap.querySelectorAll('div') : [];
-        var nickname = '';
-        for (var nc = 0; nc < nameChildren.length; nc++) {
-          var ncText = (nameChildren[nc].innerText || '').trim();
-          if (ncText && !/^\d{1,2}:\d{2}/.test(ncText) && ncText !== '\u6211\uFF1A' &&
-              ncText.indexOf('\u5185\u5BB9\u7531AI\u751F\u6210') === -1) {
-            nickname = ncText;
-            break;
-          }
+      var idx = pickNextCard(cards, cursor, done);
+      if (idx === -1) {
+        // 已加载的卡片都处理完了：按半屏步进往下滚，触发加载更多（步进小于一屏，避免滚过头漏卡片）
+        stall++;
+        if (scrollBox && scrollBox !== document.body) {
+          scrollBox.scrollTop += Math.max(100, Math.floor(scrollBox.clientHeight * 0.6));
+        } else if (cards.length) {
+          cards[cards.length - 1].scrollIntoView({ block: 'end' });
         }
-        if (!nickname) {
-          var cardLines = (card.innerText || '').split('\n');
-          nickname = (cardLines[0] || '').trim();
-        }
-
-        if (visited.has(nickname)) continue;
-        visited.add(nickname);
-        foundNew = true;
-
-        card.scrollIntoView({ block: 'nearest' });
-        card.click();
-        await new Promise(function(r) { setTimeout(r, 650); });
-
-        var extracted = extractQAPairs();
-        dataset.push({ nickname: nickname, pairs: extracted.pairs, lastTime: extracted.lastTime });
-
-        var progress = dataset.length + '/' + maxCount;
-        var logQ = extracted.pairs.length > 0 ? extracted.pairs[0].q.slice(0, 18) : '';
-        console.log('[' + progress + '] ' + nickname + ' -> Q1: ' + logQ);
-        updateStatus('\u2708\uFE0F \u62BD\u53D6\u4E2D ' + progress + ' | ' + nickname +
-          (logQ ? ' -> ' + logQ : ''));
+        await sleep(800);
+        continue;
       }
+      stall = 0;
+      cursor = idx + 1;
 
-      if (!foundNew) {
-        noNewCount++;
-        if (scrollBox) {
-          scrollBox.scrollTop += 500;
-          await new Promise(function(r) { setTimeout(r, 500); });
-        }
-      } else {
-        noNewCount = 0;
-      }
+      var card = cards[idx];
+      done.add(card);
+      var nickname = getNickname(card);
+      var prevText = getChatText();
+
+      card.scrollIntoView({ block: 'nearest' });
+      card.click();
+      await waitForChatSwitch(prevText);
+      if (state.cancelled) break;
+
+      var extracted = extractQAPairs();
+      dataset.push({ nickname: nickname, pairs: extracted.pairs, lastTime: extracted.lastTime });
+
+      var progress = dataset.length + '/' + maxCount;
+      var logQ = extracted.pairs.length > 0 ? extracted.pairs[0].q.slice(0, 18) : '';
+      console.log('[' + progress + '] ' + nickname + ' -> Q1: ' + logQ);
+      updateStatus('\u2708\uFE0F \u62BD\u53D6\u4E2D ' + progress + ' | ' + nickname +
+        (logQ ? ' -> ' + logQ : ''));
     }
 
     showControls(false);
